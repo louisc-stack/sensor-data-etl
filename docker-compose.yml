@@ -1,0 +1,33 @@
+services:
+  server:
+    container_name: server
+    image: sensor-data-etl-server:dev
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - 3000:3000
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./data/sensor-data:/app/data/sensor-data:ro
+      - ./server/src:/app/src
+      - ./server/tsconfig.json:/app/tsconfig.json
+      - ./server/package.json:/app/package.json
+    depends_on:
+      - database
+  database:
+    container_name: database
+    image: mysql:9.7
+    ports:
+      - 3306:3306
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+    volumes:
+      - sensor-data-etl-mysql:/var/lib/mysql
+      - ./database/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
+volumes:
+  sensor-data-etl-mysql:
+    driver: local
