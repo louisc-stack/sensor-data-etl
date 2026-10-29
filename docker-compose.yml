@@ -2,6 +2,8 @@ services:
   server:
     container_name: server
     image: sensor-data-etl-server:dev
+    profiles:
+      - development
     build:
       context: ./server
       dockerfile: Dockerfile
@@ -9,25 +11,59 @@ services:
     ports:
       - 3000:3000
     environment:
-      - NODE_ENV=development
+      - MIN_FILE_CONCURRENCY=${MIN_FILE_CONCURRENCY}
+      - MAX_FILE_CONCURRENCY=${MAX_FILE_CONCURRENCY}
+      - BATCH_SIZE=${BATCH_SIZE}
+      - DATABASE_HOST=${MYSQL_HOST}
+      - DATABASE_USER=${MYSQL_USER}
+      - DATABASE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - DATABASE_NAME=${MYSQL_DATABASE}
+      - DATABASE_PORT=${MYSQL_PORT}
     volumes:
-      - ./data/sensor-data:/app/data/sensor-data:ro
+      - ${HOST_DATA_DIR}:/app/data/sensor-data:ro
       - ./server/src:/app/src
       - ./server/tsconfig.json:/app/tsconfig.json
       - ./server/package.json:/app/package.json
     depends_on:
-      - database
+      database:
+        condition: service_healthy
   database:
     container_name: database
     image: mysql:9.7
+    profiles:
+      - development
     ports:
       - 3306:3306
     environment:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     volumes:
       - sensor-data-etl-mysql:/var/lib/mysql
       - ./database/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
+  
+  server-test:
+    container_name: server-test
+    image: sensor-data-etl-server:dev
+    profiles:
+      - test
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      target: development
+    command: ["npm", "run", "test"]
+    environment:
+      - NODE_ENV=test
+    volumes:
+      - ./server/src:/app/src
+      - ./server/test:/app/test
+      - ./server/tsconfig.json:/app/tsconfig.json
+      - ./server/package.json:/app/package.json
 volumes:
   sensor-data-etl-mysql:
     driver: local
