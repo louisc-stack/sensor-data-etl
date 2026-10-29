@@ -1,6 +1,7 @@
 import path from "node:path";
 import Piscina from "piscina";
 import { listCsvFiles } from "./list-csv-files.js";
+import type { FileSummary } from "./types/file-summary.js";
 
 async function main() {
   const {
@@ -36,10 +37,43 @@ async function main() {
   });
 
   try {
-    await Promise.all(csvfilePaths.map((filePath) => piscina.run(filePath)));
+    const summaries = await Promise.all(
+      csvfilePaths.map((filePath) =>
+        piscina.run(filePath) as Promise<FileSummary>,
+      ),
+    );
+
+    const total: FileSummary = {
+      fileName: "total",
+      rowsRead: 0,
+      rowsInserted: 0,
+      rowsInvalidated: 0,
+      rowsTransformRejected: 0,
+      rowsIgnored: 0,
+      insertFailed: 0,
+    };
+
+    for (const summary of summaries) {
+      console.log(formatSummary(summary));
+      total.rowsRead += summary.rowsRead;
+      total.rowsInserted += summary.rowsInserted;
+      total.rowsInvalidated += summary.rowsInvalidated;
+      total.rowsTransformRejected += summary.rowsTransformRejected;
+      total.rowsIgnored += summary.rowsIgnored;
+      total.insertFailed += summary.insertFailed;
+    }
+    console.log(formatSummary(total));
+
+    if (total.insertFailed > 0) {
+      process.exitCode = 1;
+    }
   } finally {
     await piscina.close();
   }
+}
+
+function formatSummary(summary: FileSummary): string {
+  return `${summary.fileName} read=${summary.rowsRead} inserted=${summary.rowsInserted} invalidated=${summary.rowsInvalidated} transformRejected=${summary.rowsTransformRejected} rowsIgnored=${summary.rowsIgnored} insertFailed=${summary.insertFailed}`;
 }
 
 function loadConfig() {

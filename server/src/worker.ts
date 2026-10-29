@@ -1,9 +1,11 @@
 import { createReadStream } from "node:fs";
+import path from "node:path";
 import { parse } from "csv-parse";
 import { DateTime } from "luxon";
-import mysql from "mysql2/promise";
+import mysql, { type ResultSetHeader } from "mysql2/promise";
 import { workerData } from "piscina";
 import { z } from "zod";
+import type { FileSummary } from "./types/file-summary.js";
 import type { SensorData, SensorDataRaw } from "./types/sensor-data.js";
 import type { WorkerConfig } from "./types/worker-config.js";
 
@@ -17,8 +19,17 @@ const csvSensorRowSchema = z.object({
     .refine((field) => Number.isFinite(Number(field))),
 });
 
-export default async function processFile(filePath: string): Promise<void> {
+export default async function processFile(filePath: string): Promise<FileSummary> {
   const config = workerData as WorkerConfig;
+  const summary: FileSummary = {
+    fileName: path.basename(filePath),
+    rowsRead: 0,
+    rowsInserted: 0,
+    rowsInvalidated: 0,
+    rowsTransformRejected: 0,
+    rowsIgnored: 0,
+    insertFailed: 0,
+  };
   const connection = await mysql.createConnection({
     host: config.DATABASE_HOST,
     port: config.DATABASE_PORT,
@@ -40,25 +51,27 @@ export default async function processFile(filePath: string): Promise<void> {
 
   try {
     for await (const record of parser) {
+      summary.rowsRead += 1;
+
       const validatedRecord = validateSensorData(record);
       if (!validatedRecord) {
+        summary.rowsInvalidated += 1;
         continue;
       }
 
       const transformedRecord = transformSensorData(validatedRecord);
       if (!transformedRecord) {
+        summary.rowsTransformRejected += 1;
         continue;
       }
       batch.push(transformedRecord);
       if (batch.length >= config.BATCH_SIZE) {
-        await insertBatch(connection, batch);
-        batch.length = 0;
+        await flushBatch(connection, batch, summary);
       }
     }
 
-    if (batch.length > 0) {
-      await insertBatch(connection, batch);
-    }
+    await flushBatch(connection, batch, summary);
+    return summary;
   } finally {
     parser.destroy();
     input.destroy();
@@ -66,17 +79,40 @@ export default async function processFile(filePath: string): Promise<void> {
   }
 }
 
-async function insertBatch(connection: mysql.Connection, batch: SensorData[]): Promise<void> {
-  const values = batch.map((record) => [record.timestamp, record.sensorName, record.value]);
+async function flushBatch(
+  connection: mysql.Connection,
+  batch: SensorData[],
+  summary: FileSummary,
+): Promise<void> {
+  if (batch.length === 0) {
+    return;
+  }
 
   try {
-    await connection.query(
-      `INSERT IGNORE INTO sensor_data (\`timestamp\`, sensorName, value) VALUES ?`,
-      [values],
-    );
-  } catch (error) {
-    throw error;
+    const affectedRows = await insertBatch(connection, batch);
+    summary.rowsInserted += affectedRows;
+    summary.rowsIgnored += batch.length - affectedRows;
+  } catch {
+    summary.insertFailed += batch.length;
   }
+  batch.length = 0;
+}
+
+async function insertBatch(
+  connection: mysql.Connection,
+  batch: SensorData[],
+): Promise<number> {
+  const values = batch.map((record) => [
+    record.timestamp,
+    record.sensorName,
+    record.value,
+  ]);
+
+  const [result] = await connection.query<ResultSetHeader>(
+    `INSERT IGNORE INTO sensor_data (\`timestamp\`, sensorName, value) VALUES ?`,
+    [values],
+  );
+  return result.affectedRows;
 }
 
 export function validateSensorData(record: {

@@ -57,6 +57,24 @@ Tests cover validation, UTC normalization, and CSV listing:
 docker compose --profile=test run --rm server-test
 ```
 
+## Summary log
+
+Each file prints one line, then a `total` line that adds those counts together:
+
+```text
+file-1.csv read=12 inserted=10 invalidated=1 transformRejected=0 rowsIgnored=1 insertFailed=0
+total read=12 inserted=10 invalidated=1 transformRejected=0 rowsIgnored=1 insertFailed=0
+```
+
+| Field | Meaning |
+|-------|---------|
+| `read` | Data rows in the file (the header is not counted) |
+| `inserted` | Rows written to database |
+| `invalidated` | Rows that failed validation |
+| `transformRejected` | Rows that failed data transformation after validation |
+| `rowsIgnored` | Rows skipped because `(sensorName, timestamp)` was already present |
+| `insertFailed` | Rows in a batch whose `INSERT` failed |
+
 ## Schema
 
 See [database/initdb.sql](database/initdb.sql). Primary key `(sensorName, timestamp)` enforces one reading per sensor per instant (UTC, millisecond precision). `sensorName` uses a case-sensitive collation.
