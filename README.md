@@ -20,6 +20,8 @@ Copy [.env.example](.env.example) to `.env` if you do not have one yet. Importan
 
 The loader always reads CSVs from `/app/data/sensor-data` inside the container; change `HOST_DATA_DIR` to point at another folder on the host.
 
+`MYSQL_ROOT_PASSWORD` in `.env.example` is a local development default. MySQL in this setup is for localhost only. Do not reuse that password on a host that exposes port 3306.
+
 ## Run the program (recommended)
 
 ```bash
